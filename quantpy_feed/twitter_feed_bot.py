@@ -116,21 +116,6 @@ def get_database_stats():
         return None
     finally:
         cursor.close()
-        conn.close()# Last updated
-        cursor.execute("""
-            SELECT MAX(updated_at) FROM field_prompts;
-        """)
-        last_updated = cursor.fetchone()[0]
-        
-        return {
-            'total_records': total_records,
-            'last_updated': last_updated
-        }
-    except Exception as e:
-        st.error(f"❌ Error getting database stats: {e}")
-        return None
-    finally:
-        cursor.close()
         conn.close()
 
 def main():
