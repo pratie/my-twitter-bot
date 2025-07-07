@@ -136,7 +136,6 @@ def get_database_stats():
 def main():
     """Main Streamlit application"""
     
-    # Page configuration
     st.set_page_config(
         page_title="Field Prompts Manager",
         page_icon="📝",
@@ -144,7 +143,6 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # Custom CSS for better styling
     st.markdown("""
     <style>
     .main-header {
@@ -161,27 +159,14 @@ def main():
         border-left: 4px solid #1f77b4;
         margin-bottom: 1rem;
     }
-    .field-name {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #2c3e50;
-        margin-bottom: 0.5rem;
-    }
-    .timestamp {
-        font-size: 0.8rem;
-        color: #7f8c8d;
-    }
     </style>
     """, unsafe_allow_html=True)
     
-    # Header
-    st.markdown('<div class="main-header">📝 Field Prompts Manager</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Field Prompts Manager</div>', unsafe_allow_html=True)
     
-    # Sidebar
     with st.sidebar:
-        st.header("📊 Database Info")
+        st.header("Database Info")
         
-        # Database stats
         stats = get_database_stats()
         if stats:
             st.metric("Total Records", stats['total_records'])
@@ -190,30 +175,26 @@ def main():
         
         st.divider()
         
-        # Refresh button
-        if st.button("🔄 Refresh Data", use_container_width=True):
+        if st.button("Refresh Data", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
     
-    # Main content
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.header("🔍 Select Filters")
+        st.header("Select Filters")
         
-        # Area selection
         areas = get_unique_areas()
         if not areas:
             st.warning("No areas found in database. Please run data ingestion first.")
             st.stop()
         
         selected_area = st.selectbox(
-            "📂 Select Area:",
+            "Select Area:",
             areas,
             key="area_selector"
         )
         
-        # Sub area selection
         if selected_area:
             sub_areas = get_sub_areas_for_area(selected_area)
             if not sub_areas:
@@ -221,7 +202,7 @@ def main():
                 st.stop()
             
             selected_sub_area = st.selectbox(
-                "📁 Select Sub Area:",
+                "Select Sub Area:",
                 sub_areas,
                 key="sub_area_selector"
             )
@@ -229,31 +210,26 @@ def main():
             selected_sub_area = None
     
     with col2:
-        st.header("📝 Prompts")
+        st.header("Prompts")
         
         if selected_area and selected_sub_area:
-            # Get prompts
             prompts = get_prompts_for_area_subarea(selected_area, selected_sub_area)
             
             if not prompts:
-                st.info(f"No prompts found for {selected_area} → {selected_sub_area}")
+                st.info(f"No prompts found for {selected_area} -> {selected_sub_area}")
             else:
-                st.success(f"Found {len(prompts)} prompts for **{selected_area}** → **{selected_sub_area}**")
+                st.success(f"Found {len(prompts)} prompts for **{selected_area}** -> **{selected_sub_area}**")
                 
-                # Display prompts
                 for i, (record_id, field, prompt, created_at, updated_at) in enumerate(prompts):
                     
-                    # Create expandable card for each prompt
-                    with st.expander(f"📋 {field}", expanded=False):
+                    with st.expander(f"{field}", expanded=False):
                         
-                        # Show timestamps
                         col_time1, col_time2 = st.columns(2)
                         with col_time1:
                             st.caption(f"Created: {created_at.strftime('%Y-%m-%d %H:%M')}")
                         with col_time2:
                             st.caption(f"Updated: {updated_at.strftime('%Y-%m-%d %H:%M')}")
                         
-                        # Show current prompt
                         st.subheader("Current Prompt:")
                         st.text_area(
                             "Current content:",
@@ -263,10 +239,8 @@ def main():
                             key=f"current_prompt_{record_id}"
                         )
                         
-                        # Edit section
-                        st.subheader("✏️ Edit Prompt:")
+                        st.subheader("Edit Prompt:")
                         
-                        # New prompt input
                         new_prompt = st.text_area(
                             "Enter new prompt:",
                             value=prompt,
@@ -275,37 +249,27 @@ def main():
                             help="Edit the prompt content here"
                         )
                         
-                        # Update button
                         col_btn1, col_btn2 = st.columns([1, 3])
                         with col_btn1:
-                            if st.button(f"💾 Update", key=f"update_btn_{record_id}"):
+                            if st.button(f"Update", key=f"update_btn_{record_id}"):
                                 if new_prompt.strip() != prompt.strip():
                                     with st.spinner("Updating..."):
                                         if update_prompt(record_id, new_prompt.strip()):
-                                            st.success("✅ Prompt updated successfully!")
+                                            st.success("Prompt updated successfully")
                                             st.cache_data.clear()
                                             st.rerun()
                                         else:
-                                            st.error("❌ Failed to update prompt")
+                                            st.error("Failed to update prompt")
                                 else:
                                     st.info("No changes detected")
                         
                         with col_btn2:
-                            if st.button(f"↩️ Reset", key=f"reset_btn_{record_id}"):
+                            if st.button(f"Reset", key=f"reset_btn_{record_id}"):
                                 st.rerun()
                         
                         st.divider()
         else:
-            st.info("👆 Please select both Area and Sub Area to view prompts")
-    
-    # Footer
-    st.divider()
-    st.markdown("""
-    <div style='text-align: center; color: #7f8c8d; font-size: 0.9rem;'>
-    💡 <strong>Tip:</strong> Use the expandable cards to view and edit individual prompts. 
-    Changes are saved immediately to the database.
-    </div>
-    """, unsafe_allow_html=True)
+            st.info("Please select both Area and Sub Area to view prompts")
 
 if __name__ == "__main__":
     main()
