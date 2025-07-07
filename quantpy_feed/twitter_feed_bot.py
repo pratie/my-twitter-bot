@@ -1,135 +1,311 @@
-import os
-import tweepy
-import logging
-from dataclasses import asdict
-from langchain.chat_models import ChatOpenAI
+import streamlit as st
+import psycopg2
+import pandas as pd
+from datetime import datetime
+
+# Import your DB_CONFIG here
+# from your_config import DB_CONFIG
+
+def get_db_connection():
+    """Establish connection to PostgreSQL database"""
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        conn.autocommit = False
+        return conn
+    except Exception as e:
+        st.error(f"Error connecting to database: {e}")
+        st.stop()
+
+@st.cache_data
+def get_unique_areas():
+    """Get all unique areas from database"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT area FROM field_prompts ORDER BY area;")
+        areas = [row[0] for row in cursor.fetchall()]
+        return areas
+    except Exception as e:
+        st.error(f"Error fetching areas: {e}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+@st.cache_data
+def get_sub_areas_for_area(area):
+    """Get all sub areas for a given area"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT sub_area 
+            FROM field_prompts 
+            WHERE area = %s 
+            ORDER BY sub_area;
+        """, (area,))
+        sub_areas = [row[0] for row in cursor.fetchall()]
+        return sub_areas
+    except Exception as e:
+        st.error(f"Error fetching sub areas: {e}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+def get_prompts_for_area_subarea(area, sub_area):
+    """Get all prompts for a given area and sub area"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, field, prompt, created_at, updated_at
+            FROM field_prompts 
+            WHERE area = %s AND sub_area = %s
+            ORDER BY field;
+        """, (area, sub_area))
+        
+        results = cursor.fetchall()
+        return results
+    except Exception as e:
+        st.error(f"Error fetching prompts: {e}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+def update_prompt(record_id, new_prompt):
+    """Update a specific prompt"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE field_prompts 
+            SET prompt = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (new_prompt, record_id))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error updating prompt: {e}")
+        conn.rollback()
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+def get_database_stats():
+    """Get database statistics for sidebar"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM field_prompts;")
+        total_records = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT MAX(updated_at) FROM field_prompts;")
+        last_updated = cursor.fetchone()[0]
+        
+        return {
+            'total_records': total_records,
+            'last_updated': last_updated
+        }
+    except Exception as e:
+        st.error(f"Error getting database stats: {e}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()# Last updated
+        cursor.execute("""
+            SELECT MAX(updated_at) FROM field_prompts;
+        """)
+        last_updated = cursor.fetchone()[0]
+        
+        return {
+            'total_records': total_records,
+            'last_updated': last_updated
+        }
+    except Exception as e:
+        st.error(f"❌ Error getting database stats: {e}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+def main():
+    """Main Streamlit application"""
+    
+    # Page configuration
+    st.set_page_config(
+        page_title="Field Prompts Manager",
+        page_icon="📝",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Custom CSS for better styling
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .prompt-card {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #1f77b4;
+        margin-bottom: 1rem;
+    }
+    .field-name {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #2c3e50;
+        margin-bottom: 0.5rem;
+    }
+    .timestamp {
+        font-size: 0.8rem;
+        color: #7f8c8d;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header
+    st.markdown('<div class="main-header">📝 Field Prompts Manager</div>', unsafe_allow_html=True)
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("📊 Database Info")
+        
+        # Database stats
+        stats = get_database_stats()
+        if stats:
+            st.metric("Total Records", stats['total_records'])
+            if stats['last_updated']:
+                st.write(f"**Last Updated:** {stats['last_updated'].strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        st.divider()
+        
+        # Refresh button
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # Main content
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.header("🔍 Select Filters")
+        
+        # Area selection
+        areas = get_unique_areas()
+        if not areas:
+            st.warning("No areas found in database. Please run data ingestion first.")
+            st.stop()
+        
+        selected_area = st.selectbox(
+            "📂 Select Area:",
+            areas,
+            key="area_selector"
+        )
+        
+        # Sub area selection
+        if selected_area:
+            sub_areas = get_sub_areas_for_area(selected_area)
+            if not sub_areas:
+                st.warning(f"No sub areas found for area: {selected_area}")
+                st.stop()
+            
+            selected_sub_area = st.selectbox(
+                "📁 Select Sub Area:",
+                sub_areas,
+                key="sub_area_selector"
+            )
+        else:
+            selected_sub_area = None
+    
+    with col2:
+        st.header("📝 Prompts")
+        
+        if selected_area and selected_sub_area:
+            # Get prompts
+            prompts = get_prompts_for_area_subarea(selected_area, selected_sub_area)
+            
+            if not prompts:
+                st.info(f"No prompts found for {selected_area} → {selected_sub_area}")
+            else:
+                st.success(f"Found {len(prompts)} prompts for **{selected_area}** → **{selected_sub_area}**")
+                
+                # Display prompts
+                for i, (record_id, field, prompt, created_at, updated_at) in enumerate(prompts):
+                    
+                    # Create expandable card for each prompt
+                    with st.expander(f"📋 {field}", expanded=False):
+                        
+                        # Show timestamps
+                        col_time1, col_time2 = st.columns(2)
+                        with col_time1:
+                            st.caption(f"Created: {created_at.strftime('%Y-%m-%d %H:%M')}")
+                        with col_time2:
+                            st.caption(f"Updated: {updated_at.strftime('%Y-%m-%d %H:%M')}")
+                        
+                        # Show current prompt
+                        st.subheader("Current Prompt:")
+                        st.text_area(
+                            "Current content:",
+                            value=prompt,
+                            height=100,
+                            disabled=True,
+                            key=f"current_prompt_{record_id}"
+                        )
+                        
+                        # Edit section
+                        st.subheader("✏️ Edit Prompt:")
+                        
+                        # New prompt input
+                        new_prompt = st.text_area(
+                            "Enter new prompt:",
+                            value=prompt,
+                            height=150,
+                            key=f"new_prompt_{record_id}",
+                            help="Edit the prompt content here"
+                        )
+                        
+                        # Update button
+                        col_btn1, col_btn2 = st.columns([1, 3])
+                        with col_btn1:
+                            if st.button(f"💾 Update", key=f"update_btn_{record_id}"):
+                                if new_prompt.strip() != prompt.strip():
+                                    with st.spinner("Updating..."):
+                                        if update_prompt(record_id, new_prompt.strip()):
+                                            st.success("✅ Prompt updated successfully!")
+                                            st.cache_data.clear()
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Failed to update prompt")
+                                else:
+                                    st.info("No changes detected")
+                        
+                        with col_btn2:
+                            if st.button(f"↩️ Reset", key=f"reset_btn_{record_id}"):
+                                st.rerun()
+                        
+                        st.divider()
+        else:
+            st.info("👆 Please select both Area and Sub Area to view prompts")
+    
+    # Footer
+    st.divider()
+    st.markdown("""
+    <div style='text-align: center; color: #7f8c8d; font-size: 0.9rem;'>
+    💡 <strong>Tip:</strong> Use the expandable cards to view and edit individual prompts. 
+    Changes are saved immediately to the database.
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    # module being called directly, use absolute path
-    from twitter import Boolean, Tweet, TweetType, TweetQueue
-    from process_tweets import generate_tweets, search_next_tweet
-else:
-    # module being called as package, use relative paths
-    from .twitter import Boolean, Tweet, TweetType, TweetQueue
-    from .process_tweets import generate_tweets, search_next_tweet
-
-# Helpful when testing locally
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# Tweet Settings & Variables
-TWEET_TYPE = TweetType.THREAD
-
-# Directories
-CUR_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_DIR = os.path.abspath(os.path.join(CUR_DIR, os.pardir))
-LOG_FILE = os.path.join(APP_DIR, "twitter-bot.log")
-TEXT_FILE = os.path.join(APP_DIR, "data/processed/quants_tweets.txt")
-
-# Load your Twitter API keys
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
-TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-
-# set up logging to file
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
-    datefmt="%y-%m-%d %H:%M",
-    filename="twitter-bot.log",
-    filemode="a",
-)
-
-
-class TwitterBot:
-    """TwitterBot class to help us organize our code and manage shared state"""
-
-    def __init__(self):
-        self.twitter_api = tweepy.Client(
-            bearer_token=TWITTER_BEARER_TOKEN,
-            consumer_key=TWITTER_API_KEY,
-            consumer_secret=TWITTER_API_SECRET,
-            access_token=TWITTER_ACCESS_TOKEN,
-            access_token_secret=TWITTER_ACCESS_TOKEN_SECRET,
-            wait_on_rate_limit=True,
-        )
-
-        self.llm = ChatOpenAI(
-            temperature=0.3,
-            openai_api_key=OPENAI_API_KEY,
-            model_name="gpt-3.5-turbo-0613",
-        )
-
-        self.text_file = TEXT_FILE
-
-        self.tweetQueue = TweetQueue.from_text_file(self.text_file)
-
-    def verify_tweet_to_send(self) -> None:
-        if len(self.tweetQueue.tweets_ready_for_sending) == 0:
-            self.process_tweets()
-
-    def process_tweets(self):
-        generate_tweets(self.llm, self.tweetQueue)
-        self.tweetQueue.to_text_file(self.text_file)
-
-    def post_thread(self, tweet: Tweet) -> None:
-        tweet_d = asdict(tweet)
-        try:
-            for key, tweet_thread in tweet_d.items():
-                if key == "Hook":
-                    _tweet_thread = self.twitter_api.create_tweet(text=tweet_thread)
-                else:
-                    self.twitter_api.create_tweet(
-                        text=tweet_thread,
-                        in_reply_to_tweet_id=_last_tweet_id.data["id"],
-                    )
-                _last_tweet_id = _tweet_thread
-                logging.info(f"Sent Status: TRUE. Tweet: {tweet_thread}")
-            return True
-        except Exception as e:
-            logging.warning(e)
-            return False
-
-    def post_tweet(self, tweet: Tweet) -> None:
-        quant_tweet = tweet.to_text()
-        try:
-            self.twitter_api.create_tweet(text=quant_tweet)
-            logging.info(f"Sent Status: TRUE. Tweet: {quant_tweet}")
-            return True
-        except Exception as e:
-            logging.warning(e)
-            return False
-
-    def save_file(self):
-        self.tweetQueue.to_text_file(self.text_file)
-        logging.info("Latest version of tweets saved down.")
-
-
-def run_quantpy_feed_bot():
-    """Run twitter bot, search for next tweet and send in thread"""
-    # First step is to import file of topics and ides into TweetQueue
-    twitterBot = TwitterBot()
-    # ensure there are tweets to send
-    twitterBot.verify_tweet_to_send()
-    # Identify Tweet Track to Send
-    quant_tweet_track = search_next_tweet(twitterBot.tweetQueue)
-    # post single tweet
-    if TWEET_TYPE == TweetType.SINGLE:
-        if twitterBot.post_tweet(tweet=quant_tweet_track.tweet):
-            quant_tweet_track.update_sent_status(Boolean.TRUE)
-    # post tweet thread
-    elif TWEET_TYPE == TweetType.THREAD:
-        if twitterBot.post_thread(tweet=quant_tweet_track.tweet):
-            quant_tweet_track.update_sent_status(Boolean.TRUE)
-    # save down file
-    twitterBot.save_file()
-
-
-if __name__ == "__main__":
-    run_quantpy_feed_bot()
+    main()
