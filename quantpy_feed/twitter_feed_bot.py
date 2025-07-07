@@ -3,11 +3,16 @@ import psycopg2
 import pandas as pd
 from datetime import datetime
 
-# Import your DB_CONFIG here
-# from your_config import DB_CONFIG
+# Database configuration - Replace with your actual values
+DB_CONFIG = {
+    'host': 'your_host',
+    'database': 'your_database',
+    'user': 'your_user',
+    'password': 'your_password',
+    'port': 5432
+}
 
 def get_db_connection():
-    """Establish connection to PostgreSQL database"""
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         conn.autocommit = False
@@ -18,7 +23,6 @@ def get_db_connection():
 
 @st.cache_data
 def get_unique_areas():
-    """Get all unique areas from database"""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -34,16 +38,10 @@ def get_unique_areas():
 
 @st.cache_data
 def get_sub_areas_for_area(area):
-    """Get all sub areas for a given area"""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT DISTINCT sub_area 
-            FROM field_prompts 
-            WHERE area = %s 
-            ORDER BY sub_area;
-        """, (area,))
+        cursor.execute("SELECT DISTINCT sub_area FROM field_prompts WHERE area = %s ORDER BY sub_area;", (area,))
         sub_areas = [row[0] for row in cursor.fetchall()]
         return sub_areas
     except Exception as e:
@@ -54,7 +52,6 @@ def get_sub_areas_for_area(area):
         conn.close()
 
 def get_prompts_for_area_subarea(area, sub_area):
-    """Get all prompts for a given area and sub area"""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -64,7 +61,6 @@ def get_prompts_for_area_subarea(area, sub_area):
             WHERE area = %s AND sub_area = %s
             ORDER BY field;
         """, (area, sub_area))
-        
         results = cursor.fetchall()
         return results
     except Exception as e:
@@ -75,7 +71,6 @@ def get_prompts_for_area_subarea(area, sub_area):
         conn.close()
 
 def update_prompt(record_id, new_prompt):
-    """Update a specific prompt"""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -84,7 +79,6 @@ def update_prompt(record_id, new_prompt):
             SET prompt = %s, updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
         """, (new_prompt, record_id))
-        
         conn.commit()
         return True
     except Exception as e:
@@ -96,17 +90,13 @@ def update_prompt(record_id, new_prompt):
         conn.close()
 
 def get_database_stats():
-    """Get database statistics for sidebar"""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
         cursor.execute("SELECT COUNT(*) FROM field_prompts;")
         total_records = cursor.fetchone()[0]
-        
         cursor.execute("SELECT MAX(updated_at) FROM field_prompts;")
         last_updated = cursor.fetchone()[0]
-        
         return {
             'total_records': total_records,
             'last_updated': last_updated
@@ -119,48 +109,22 @@ def get_database_stats():
         conn.close()
 
 def main():
-    """Main Streamlit application"""
-    
     st.set_page_config(
         page_title="Field Prompts Manager",
-        page_icon="📝",
-        layout="wide",
-        initial_sidebar_state="expanded"
+        layout="wide"
     )
     
-    st.markdown("""
-    <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .prompt-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 4px solid #1f77b4;
-        margin-bottom: 1rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="main-header">Field Prompts Manager</div>', unsafe_allow_html=True)
+    st.title("Field Prompts Manager")
     
     with st.sidebar:
         st.header("Database Info")
-        
         stats = get_database_stats()
         if stats:
             st.metric("Total Records", stats['total_records'])
             if stats['last_updated']:
-                st.write(f"**Last Updated:** {stats['last_updated'].strftime('%Y-%m-%d %H:%M:%S')}")
+                st.write(f"Last Updated: {stats['last_updated'].strftime('%Y-%m-%d %H:%M')}")
         
-        st.divider()
-        
-        if st.button("Refresh Data", use_container_width=True):
+        if st.button("Refresh Data"):
             st.cache_data.clear()
             st.rerun()
     
@@ -171,26 +135,18 @@ def main():
         
         areas = get_unique_areas()
         if not areas:
-            st.warning("No areas found in database. Please run data ingestion first.")
-            st.stop()
+            st.warning("No areas found. Please run data ingestion first.")
+            return
         
-        selected_area = st.selectbox(
-            "Select Area:",
-            areas,
-            key="area_selector"
-        )
+        selected_area = st.selectbox("Select Area:", areas)
         
         if selected_area:
             sub_areas = get_sub_areas_for_area(selected_area)
             if not sub_areas:
-                st.warning(f"No sub areas found for area: {selected_area}")
-                st.stop()
+                st.warning(f"No sub areas found for: {selected_area}")
+                return
             
-            selected_sub_area = st.selectbox(
-                "Select Sub Area:",
-                sub_areas,
-                key="sub_area_selector"
-            )
+            selected_sub_area = st.selectbox("Select Sub Area:", sub_areas)
         else:
             selected_sub_area = None
     
@@ -203,11 +159,10 @@ def main():
             if not prompts:
                 st.info(f"No prompts found for {selected_area} -> {selected_sub_area}")
             else:
-                st.success(f"Found {len(prompts)} prompts for **{selected_area}** -> **{selected_sub_area}**")
+                st.success(f"Found {len(prompts)} prompts")
                 
-                for i, (record_id, field, prompt, created_at, updated_at) in enumerate(prompts):
-                    
-                    with st.expander(f"{field}", expanded=False):
+                for record_id, field, prompt, created_at, updated_at in prompts:
+                    with st.expander(f"{field}"):
                         
                         col_time1, col_time2 = st.columns(2)
                         with col_time1:
@@ -217,44 +172,39 @@ def main():
                         
                         st.subheader("Current Prompt:")
                         st.text_area(
-                            "Current content:",
+                            "Current:",
                             value=prompt,
                             height=100,
                             disabled=True,
-                            key=f"current_prompt_{record_id}"
+                            key=f"current_{record_id}"
                         )
                         
                         st.subheader("Edit Prompt:")
-                        
                         new_prompt = st.text_area(
-                            "Enter new prompt:",
+                            "New prompt:",
                             value=prompt,
                             height=150,
-                            key=f"new_prompt_{record_id}",
-                            help="Edit the prompt content here"
+                            key=f"new_{record_id}"
                         )
                         
                         col_btn1, col_btn2 = st.columns([1, 3])
                         with col_btn1:
-                            if st.button(f"Update", key=f"update_btn_{record_id}"):
+                            if st.button("Update", key=f"btn_{record_id}"):
                                 if new_prompt.strip() != prompt.strip():
-                                    with st.spinner("Updating..."):
-                                        if update_prompt(record_id, new_prompt.strip()):
-                                            st.success("Prompt updated successfully")
-                                            st.cache_data.clear()
-                                            st.rerun()
-                                        else:
-                                            st.error("Failed to update prompt")
+                                    if update_prompt(record_id, new_prompt.strip()):
+                                        st.success("Updated successfully")
+                                        st.cache_data.clear()
+                                        st.rerun()
+                                    else:
+                                        st.error("Update failed")
                                 else:
                                     st.info("No changes detected")
                         
                         with col_btn2:
-                            if st.button(f"Reset", key=f"reset_btn_{record_id}"):
+                            if st.button("Reset", key=f"reset_{record_id}"):
                                 st.rerun()
-                        
-                        st.divider()
         else:
-            st.info("Please select both Area and Sub Area to view prompts")
+            st.info("Please select both Area and Sub Area")
 
 if __name__ == "__main__":
     main()
